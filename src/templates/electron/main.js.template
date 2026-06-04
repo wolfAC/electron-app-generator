@@ -1,0 +1,209 @@
+const { app, BrowserWindow, protocol, ipcMain, dialog, Notification, nativeImage, Tray, Menu, net, safeStorage } = require('electron');
+const path = require('path');
+const fs = require('fs-extra');
+const log = require('electron-log');
+const { createUpdater } = require('./updater');
+
+// This will be replaced by the generator with the actual config
+const CONFIG = {{CONFIG}};
+
+log.transports.file.level = 'info';
+log.initialize();
+
+let mainWindow;
+let trayIcon = null;
+
+/**
+ * Setup the custom protocol app://local to support IndexedDB and Service Workers.
+ * This protocol serves files from the application's build directory.
+ */
+async function setupProtocol() {
+  await protocol.handle('app', async (request) => {
+    const url = request.url;
+    const buildPath = path.join(app.getAppPath(), 'web');
+
+    // Handle the root path
+    let filePath = url.replace('app://local', '');
+    if (filePath === '' || filePath === '/') {
+      filePath = '/index.html';
+    }
+
+    const absolutePath = path.join(buildPath, filePath);
+
+    try {
+      if (await fs.pathExists(absolutePath) && (await fs.stat(absolutePath)).isFile()) {
+        return await net.fetch(`file://${absolutePath}`);
+      }
+
+      // Fallback for SPA routing (return index.html for non-file requests)
+      const indexPath = path.join(buildPath, 'index.html');
+      if (await fs.pathExists(indexPath)) {
+        return await net.fetch(`file://${indexPath}`);
+      }
+    } catch (e) {
+      log.error('Protocol error:', e);
+    }
+
+    return new Response('Not Found', { status: 404 });
+  });
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: CONFIG.window.width,
+    height: CONFIG.window.height,
+    minWidth: CONFIG.window.minWidth,
+    minHeight: CONFIG.window.minHeight,
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+    ...(CONFIG.features.tray && { show: false }), // Start hidden if tray is enabled
+  });
+
+  mainWindow.loadURL('app://local/');
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+}
+
+function setupTray() {
+  if (!CONFIG.features.tray) return;
+
+  const iconPath = path.join(app.getAppPath(), 'electronify/assets/tray.png');
+  const icon = nativeImage.createFromPath(iconPath);
+
+  trayIcon = new Tray(icon);
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Show App', click: () => mainWindow.show() },
+    { label: 'Hide App', click: () => mainWindow.hide() },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() },
+  ]);
+
+  trayIcon.setContextMenu(contextMenu);
+}
+
+// Handle Single Instance Lock
+if (CONFIG.features.singleInstance) {
+  const locked = app.requestSingleInstanceLock();
+  if (!locked) {
+    app.quit();
+    return;
+  }
+
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
+app.whenReady().then(async () => {
+  try {
+    await setupProtocol();
+    createWindow();
+    setupTray();
+    log.info('Application started successfully');
+  } catch (e) {
+    log.error('Failed to start application:', e);
+  }
+});
+
+// IPC Handlers for Desktop API
+ipcMain.handle('desktop:notify', (event, { title, body }) => {
+  new Notification({ title, body }).show();
+});
+
+ipcMain.handle('desktop:getVersion', () => CONFIG.version);
+
+ipcMain.handle('desktop:openFile', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ['openFile', 'multiSelections'],
+  });
+  return canceled ? null : filePaths;
+});
+
+ipcMain.handle('desktop:openFolder', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+  });
+  return canceled ? null : filePaths;
+});
+
+ipcMain.handle('desktop:saveFile', async (event, { defaultName }) => {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    defaultPath: defaultName,
+  });
+  return canceled ? null : filePath;
+});
+
+ipcMain.handle('desktop:secureStore:set', async (event, { key, value }) => {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'secure_store.json');
+    const encrypted = safeStorage.encryptString(value);
+
+    let store = {};
+    if (await fs.pathExists(storePath)) {
+      store = await fs.readJson(storePath);
+    }
+
+    store[key] = encrypted.toString('base64');
+    await fs.writeJson(storePath, store, { spaces: 2 });
+
+    return { success: true };
+  } catch (e) {
+    log.error('SecureStore set error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('desktop:secureStore:get', async (event, key) => {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'secure_store.json');
+    if (!await fs.pathExists(storePath)) return null;
+    const store = await fs.readJson(storePath);
+    const encrypted = store[key];
+    if (!encrypted) return null;
+    return safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+  } catch (e) {
+    log.error('SecureStore get error:', e);
+    return null;
+  }
+});
+
+ipcMain.handle('desktop:secureStore:delete', async (event, key) => {
+  try {
+    const storePath = path.join(app.getPath('userData'), 'secure_store.json');
+    if (!await fs.pathExists(storePath)) return { success: true };
+    const store = await fs.readJson(storePath);
+    delete store[key];
+    await fs.writeJson(storePath, store, { spaces: 2 });
+    return { success: true };
+  } catch (e) {
+    log.error('SecureStore delete error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('desktop:checkForUpdates', async () => {
+  if (!CONFIG.features.autoUpdater) {
+    return { status: 'Auto-updater is disabled in config.' };
+  }
+  try {
+    const updater = createUpdater(CONFIG);
+    const result = await updater.check();
+    return { status: 'Check complete', result };
+  } catch (e) {
+    log.error('Update check failed:', e);
+    return { status: 'Error checking for updates', error: e.message };
+  }
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});

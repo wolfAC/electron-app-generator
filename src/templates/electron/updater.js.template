@@ -1,0 +1,87 @@
+const { autoUpdater } = require('electron-updater');
+const log = require('electron-log');
+
+/**
+ * Base class for Update Providers
+ */
+class UpdateProvider {
+  async check() { throw new Error('Not implemented'); }
+  async download() { throw new Error('Not implemented'); }
+  async getLatest() { throw new Error('Not implemented'); }
+}
+
+/**
+ * GitHub Releases Provider
+ */
+class GitHubProvider extends UpdateProvider {
+  async check() {
+    log.info('Checking for updates via GitHub...');
+    return await autoUpdater.checkForUpdates();
+  }
+  async download() {
+    return await autoUpdater.downloadUpdate();
+  }
+  async getLatest() {
+    return await autoUpdater.getLatestVersion();
+  }
+}
+
+/**
+ * Custom HTTP Provider
+ */
+class CustomHTTPProvider extends UpdateProvider {
+  constructor(url) {
+    super();
+    this.url = url;
+  }
+
+  async check() {
+    log.info(`Checking for updates via ${this.url}...`);
+    try {
+      const response = await fetch(`${this.url}/latest.json`);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      const currentVersion = require('./package.json').version;
+
+      if (data.version !== currentVersion) {
+        log.info(`New version available: ${data.version}`);
+        return { updateAvailable: true, version: data.version, releaseNotes: data.releaseNotes };
+      }
+
+      return { updateAvailable: false };
+    } catch (e) {
+      log.error('Custom HTTP update check failed:', e);
+      return { updateAvailable: false, error: e.message };
+    }
+  }
+
+  async download() {
+    log.info('Downloading update from custom provider...');
+    // Implementation would typically involve autoUpdater.downloadUpdate()
+    // if the custom provider is just a wrapper around a compatible server.
+  }
+
+  async getLatest() {
+    try {
+      const response = await fetch(`${this.url}/latest.json`);
+      const data = await response.json();
+      return data.version;
+    } catch (e) {
+      return 'Unknown';
+    }
+  }
+}
+
+const PROVIDERS = {
+  github: GitHubProvider,
+  custom: CustomHTTPProvider,
+  // Other providers would be added here
+};
+
+function createUpdater(config) {
+  const ProviderClass = PROVIDERS[config.updater.provider] || PROVIDERS.custom;
+  return new ProviderClass(config.updater.url);
+}
+
+module.exports = { createUpdater };

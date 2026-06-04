@@ -1,0 +1,15 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('desktop', {
+  notify: (options) => ipcRenderer.invoke('desktop:notify', options),
+  getVersion: () => ipcRenderer.invoke('desktop:getVersion'),
+  openFile: () => ipcRenderer.invoke('desktop:openFile'),
+  openFolder: () => ipcRenderer.invoke('desktop:openFolder'),
+  saveFile: (details) => ipcRenderer.invoke('desktop:saveFile', details),
+  secureStore: {
+    set: (key, value) => ipcRenderer.invoke('desktop:secureStore:set', { key, value }),
+    get: (key) => ipcRenderer.invoke('desktop:secureStore:get', key),
+    delete: (key) => ipcRenderer.invoke('desktop:secureStore:delete', key),
+  },
+  checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates'),
+});

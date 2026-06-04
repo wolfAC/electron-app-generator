@@ -1,0 +1,31 @@
+{
+  "name": "electronify",
+  "version": "1.0.0",
+  "description": "Production-ready Electron wrapper/generator",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "electronify": "src/cli/index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "electronify build"
+  },
+  "keywords": [
+    "electron",
+    "generator",
+    "wrapper"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^15.0.0",
+    "electron-log": "^5.4.4",
+    "fs-extra": "^11.3.5",
+    "sharp": "^0.34.5",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.8.1"
+  }
+}
