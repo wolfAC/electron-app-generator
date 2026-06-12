@@ -2,34 +2,35 @@ import path from 'path';
 import fs from 'fs-extra';
 import { validateProject } from './validator.js';
 import { pluginManager } from './pluginManager.js';
+import type { ElectronifyConfig } from './config.js';
 
 /**
  * Base class for Publish Providers
  */
-class PublishProvider {
-  async upload(artifactPath, config) { throw new Error('Not implemented'); }
+abstract class PublishProvider {
+  abstract upload(artifactPath: string, config: ElectronifyConfig): Promise<void>;
 }
 
 class GitHubProvider extends PublishProvider {
-  async upload(artifactPath, config) {
+  async upload(artifactPath: string, config: ElectronifyConfig): Promise<void> {
     console.log(`Uploading ${artifactPath} to GitHub Releases...`);
     // Use 'gh' CLI or octokit
   }
 }
 
 class CustomHTTPProvider extends PublishProvider {
-  async upload(artifactPath, config) {
+  async upload(artifactPath: string, config: ElectronifyConfig): Promise<void> {
     console.log(`Uploading ${artifactPath} to ${config.updater.url}...`);
     // Custom upload logic
   }
 }
 
-const PROVIDERS = {
+const PROVIDERS: Record<string, new () => PublishProvider> = {
   github: GitHubProvider,
   custom: CustomHTTPProvider,
 };
 
-export async function publishProject() {
+export async function publishProject(): Promise<void> {
   const config = await validateProject();
 
   // Initialize plugins

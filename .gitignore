@@ -13,6 +13,9 @@
 /out
 /.next/
 
+# compiled generator output
+/dist
+
 # Electronify Generator outputs
 /dist_electron
 /releases

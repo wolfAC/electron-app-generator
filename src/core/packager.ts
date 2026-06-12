@@ -10,7 +10,7 @@ const GENERATOR_ROOT = path.join(__dirname, '..', '..');
 /**
  * Packages the application into a runnable directory without creating installers.
  */
-export async function packageProject() {
+export async function packageProject(): Promise<void> {
   const config = await validateProject();
   const outputDir = path.join(process.cwd(), 'dist_electron');
   const appDir = path.join(outputDir, 'app');

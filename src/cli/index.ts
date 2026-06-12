@@ -7,6 +7,10 @@ import { publishProject } from '../core/publisher.js';
 
 const program = new Command();
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 program
   .name('electronify')
   .description('Convert web production builds into desktop applications')
@@ -20,7 +24,7 @@ program
       await validateProject();
       console.log('✅ Project is valid!');
     } catch (error) {
-      console.error(`❌ Validation failed: ${error.message}`);
+      console.error(`❌ Validation failed: ${errorMessage(error)}`);
       process.exit(1);
     }
   });
@@ -34,7 +38,7 @@ program
       await buildProject();
       console.log('✅ Build successful!');
     } catch (error) {
-      console.error(`❌ Build failed: ${error.message}`);
+      console.error(`❌ Build failed: ${errorMessage(error)}`);
       process.exit(1);
     }
   });
@@ -48,7 +52,7 @@ program
       await packageProject();
       console.log('✅ Packaging successful!');
     } catch (error) {
-      console.error(`❌ Packaging failed: ${error.message}`);
+      console.error(`❌ Packaging failed: ${errorMessage(error)}`);
       process.exit(1);
     }
   });
@@ -62,7 +66,7 @@ program
       await publishProject();
       console.log('✅ Publish successful!');
     } catch (error) {
-      console.error(`❌ Publish failed: ${error.message}`);
+      console.error(`❌ Publish failed: ${errorMessage(error)}`);
       process.exit(1);
     }
   });

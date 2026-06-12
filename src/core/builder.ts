@@ -11,7 +11,7 @@ const GENERATOR_ROOT = path.join(__dirname, '..', '..');
 /**
  * Builds the Electron application using the project configuration.
  */
-export async function buildProject() {
+export async function buildProject(): Promise<void> {
   const config = await validateProject();
 
   // Initialize plugins

@@ -2,14 +2,20 @@
   "name": "electronify",
   "version": "1.0.0",
   "description": "Production-ready Electron wrapper/generator",
-  "main": "dist/index.js",
+  "main": "dist/cli/index.js",
   "type": "module",
   "bin": {
-    "electronify": "src/cli/index.js"
+    "electronify": "dist/cli/index.js"
   },
+  "files": [
+    "dist",
+    "src/templates"
+  ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "electronify build"
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
   },
   "keywords": [
     "electron",
@@ -26,6 +32,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "electron-builder": "^26.8.1"
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^25.9.3",
+    "electron-builder": "^26.8.1",
+    "typescript": "^6.0.3"
   }
 }

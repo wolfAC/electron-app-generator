@@ -12,13 +12,10 @@ export const ConfigSchema = z.object({
 
   author: z.object({
     name: z.string().default("Electronify User"),
-    email: z.string().email("Invalid author email").default("admin@example.com"),
-  }).default({
-    name: "Electronify User",
-    email: "admin@example.com"
-  }),
+    email: z.email("Invalid author email").default("admin@example.com"),
+  }).prefault({}),
 
-  homepage: z.string().url("Homepage must be a valid URL").default("https://example.com"),
+  homepage: z.url("Homepage must be a valid URL").default("https://example.com"),
 
   buildFolder: z.string().min(1, "Build folder path is required").default("./build"),
 
@@ -27,7 +24,7 @@ export const ConfigSchema = z.object({
     height: z.number().int().positive().default(900),
     minWidth: z.number().int().positive().default(1000),
     minHeight: z.number().int().positive().default(700),
-  }).default({}),
+  }).prefault({}),
 
   features: z.object({
     tray: z.boolean().default(false),
@@ -35,23 +32,24 @@ export const ConfigSchema = z.object({
     dragDrop: z.boolean().default(true),
     singleInstance: z.boolean().default(true),
     autoUpdater: z.boolean().default(true),
-  }).default({}),
+  }).prefault({}),
 
   updater: z.object({
     provider: z.enum(["custom", "firebase", "cloudflare", "github", "s3"]).default("custom"),
-    url: z.string().url("Updater URL must be a valid URL").default("https://updates.example.com"),
-  }).default({}),
+    url: z.url("Updater URL must be a valid URL").default("https://updates.example.com"),
+  }).prefault({}),
 
   plugins: z.array(z.string()).default([]),
 });
 
+export type ElectronifyConfig = z.infer<typeof ConfigSchema>;
+
 /**
  * Loads and validates the configuration file.
- * @param {string} configPath Path to the config.json file.
- * @returns {Promise<z.infer<typeof ConfigSchema>>} Validated configuration.
+ * @param configPath Path to the config.json file.
  * @throws Error if configuration is invalid.
  */
-export async function loadConfig(configPath) {
+export async function loadConfig(configPath: string): Promise<ElectronifyConfig> {
   if (!await fs.pathExists(configPath)) {
     throw new Error(`Configuration file not found at ${configPath}`);
   }
@@ -60,7 +58,7 @@ export async function loadConfig(configPath) {
   const result = ConfigSchema.safeParse(rawConfig);
 
   if (!result.success) {
-    const errors = result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join('\n');
+    const errors = result.error.issues.map(e => `${e.path.join('.')}: ${e.message}`).join('\n');
     throw new Error(`Invalid configuration:\n${errors}`);
   }
 

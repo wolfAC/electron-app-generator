@@ -1,12 +1,12 @@
 import path from 'path';
 import fs from 'fs-extra';
-import { loadConfig } from './config.js';
+import { loadConfig, type ElectronifyConfig } from './config.js';
 
 /**
  * Validates the Electronify project structure.
  * Checks for config.json, build folder, and required assets.
  */
-export async function validateProject() {
+export async function validateProject(): Promise<ElectronifyConfig> {
   const configDir = path.join(process.cwd(), 'electronify');
   const configPath = path.join(configDir, 'config.json');
 
