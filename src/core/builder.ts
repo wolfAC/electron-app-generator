@@ -104,7 +104,7 @@ export async function buildProject(): Promise<void> {
           target: 'dmg',
         },
         linux: {
-          target: ['AppImage', 'deb'],
+          target: config.linux.targets,
           category: 'Utility',
           maintainer: `${config.author.name} <${config.author.email}>`,
         },

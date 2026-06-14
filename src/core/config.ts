@@ -39,6 +39,10 @@ export const ConfigSchema = z.object({
     url: z.url("Updater URL must be a valid URL").default("https://updates.example.com"),
   }).prefault({}),
 
+  linux: z.object({
+    targets: z.array(z.enum(['AppImage', 'deb', 'rpm', 'snap', 'pacman', 'flatpak'])).default(['AppImage', 'deb']),
+  }).prefault({}),
+
   plugins: z.array(z.string()).default([]),
 });
 
