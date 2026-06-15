@@ -1,1 +1,40 @@
-{"name": "Test App", "appId": "com.test.app", "buildFolder": "build"}
+{
+  "name": "Pulse App",
+  "appId": "com.pulse.app",
+  "version": "1.0.0",
+
+  "author": {
+    "name": "Wolf",
+    "email": "wofl8132609@gmail.com"
+  },
+
+  "homepage": "https://example.com",
+
+  "buildFolder": "../pulse-app/out",
+
+  "window": {
+    "width": 1400,
+    "height": 900,
+    "minWidth": 1000,
+    "minHeight": 700
+  },
+
+  "features": {
+    "tray": false,
+    "notifications": true,
+    "dragDrop": true,
+    "singleInstance": true,
+    "autoUpdater": true
+  },
+
+  "updater": {
+    "provider": "custom",
+    "url": "https://updates.example.com"
+  },
+
+  "linux": {
+    "targets": ["AppImage", "deb", "rpm"]
+  },
+
+  "plugins": []
+}
