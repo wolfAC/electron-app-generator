@@ -10,6 +10,12 @@ const CONFIG = {{CONFIG}};
 log.transports.file.level = 'info';
 log.initialize();
 
+// Must be called before app.whenReady() — registers app:// as a standard secure
+// scheme so window.location.origin, IndexedDB, and fetch all behave normally.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+]);
+
 let mainWindow;
 let trayIcon = null;
 
@@ -19,11 +25,11 @@ let trayIcon = null;
  */
 async function setupProtocol() {
   await protocol.handle('app', async (request) => {
-    const url = request.url;
     const buildPath = path.join(app.getAppPath(), 'web');
 
-    // Handle the root path
-    let filePath = url.replace('app://local', '');
+    // Use URL parsing to correctly strip query strings / fragments from the path.
+    const parsedUrl = new URL(request.url);
+    let filePath = parsedUrl.pathname;
     if (filePath === '' || filePath === '/') {
       filePath = '/index.html';
     }

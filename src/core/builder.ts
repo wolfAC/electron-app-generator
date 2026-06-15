@@ -1,5 +1,6 @@
 import path from 'path';
 import fs from 'fs-extra';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { validateProject } from './validator.js';
 import { build } from 'electron-builder';
@@ -55,6 +56,7 @@ export async function buildProject(): Promise<void> {
     },
     dependencies: {
       'electron-log': '^5.4.4',
+      'electron-updater': '^6.3.9',
       'fs-extra': '^11.3.5'
     },
     devDependencies: {
@@ -63,8 +65,8 @@ export async function buildProject(): Promise<void> {
   };
   await fs.writeJson(path.join(appDir, 'package.json'), appPackageJson, { spaces: 2 });
 
-  // Force pnpm for electron-builder by creating a dummy lockfile
-  await fs.writeFile(path.join(appDir, 'pnpm-lock.yaml'), '');
+  console.log('📦 Installing app dependencies...');
+  execSync('npm install --omit=dev', { cwd: appDir, stdio: 'inherit' });
 
   // 5. Generate main.js from template
   const mainTemplatePath = path.join(GENERATOR_ROOT, 'src/templates/electron/main.js.template');
@@ -87,10 +89,14 @@ export async function buildProject(): Promise<void> {
   // 8. Execute Electron Builder
   console.log('🛠️  Building installer with electron-builder...');
   try {
+    const iconPath = path.join(process.cwd(), 'electronify', 'assets', 'icon.png');
+    const iconExists = await fs.pathExists(iconPath);
+
     await build({
       config: {
         appId: config.appId,
         productName: config.name,
+        ...(iconExists && { icon: iconPath }),
         electronVersion: '32.0.0',
         directories: {
           app: appDir,
@@ -106,7 +112,7 @@ export async function buildProject(): Promise<void> {
         linux: {
           target: config.linux.targets,
           category: 'Utility',
-          maintainer: `${config.author.name} <${config.author.email}>`,
+          ...(config.author.name && { maintainer: `${config.author.name} <${config.author.email}>` }),
         },
         nsis: {
           oneClick: false,
