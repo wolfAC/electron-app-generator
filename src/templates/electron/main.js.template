@@ -58,16 +58,23 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: CONFIG.window.width,
     height: CONFIG.window.height,
-    minWidth: CONFIG.window.minWidth,
-    minHeight: CONFIG.window.minHeight,
+    ...(CONFIG.window.minWidth > 0 && { minWidth: CONFIG.window.minWidth }),
+    ...(CONFIG.window.minHeight > 0 && { minHeight: CONFIG.window.minHeight }),
+    ...(CONFIG.window.maxWidth && { maxWidth: CONFIG.window.maxWidth }),
+    ...(CONFIG.window.maxHeight && { maxHeight: CONFIG.window.maxHeight }),
     webPreferences: {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.js'),
     },
-    ...(CONFIG.features.tray && { show: false }), // Start hidden if tray is enabled
+    ...(CONFIG.features.tray && { show: false }),
+    autoHideMenuBar: !CONFIG.features.menuBar,
   });
+
+  if (!CONFIG.features.menuBar) {
+    Menu.setApplicationMenu(null);
+  }
 
   mainWindow.loadURL('app://local/');
 
