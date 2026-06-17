@@ -22,12 +22,15 @@ export const ConfigSchema = z.object({
   window: z.object({
     width: z.number().int().positive().default(1400),
     height: z.number().int().positive().default(900),
-    minWidth: z.number().int().positive().default(1000),
-    minHeight: z.number().int().positive().default(700),
+    minWidth: z.number().int().min(0).default(0),
+    minHeight: z.number().int().min(0).default(0),
+    maxWidth: z.number().int().positive().optional(),
+    maxHeight: z.number().int().positive().optional(),
   }).prefault({}),
 
   features: z.object({
     tray: z.boolean().default(false),
+    menuBar: z.boolean().default(true),
     notifications: z.boolean().default(true),
     dragDrop: z.boolean().default(true),
     singleInstance: z.boolean().default(true),
