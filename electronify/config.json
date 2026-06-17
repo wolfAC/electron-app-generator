@@ -21,6 +21,7 @@
 
   "features": {
     "tray": false,
+    "menu": false,
     "notifications": true,
     "dragDrop": true,
     "singleInstance": true,
