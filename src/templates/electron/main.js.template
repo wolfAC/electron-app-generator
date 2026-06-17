@@ -203,6 +203,19 @@ ipcMain.handle('desktop:secureStore:delete', async (event, key) => {
   }
 });
 
+ipcMain.handle('desktop:setIcon', (event, base64PNG) => {
+  try {
+    const { nativeImage } = require('electron');
+    const image = nativeImage.createFromDataURL(base64PNG);
+    if (mainWindow) mainWindow.setIcon(image);
+    if (trayIcon) trayIcon.setImage(image);
+    return { success: true };
+  } catch (e) {
+    log.error('setIcon error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('desktop:checkForUpdates', async () => {
   if (!CONFIG.features.autoUpdater) {
     return { status: 'Auto-updater is disabled in config.' };

@@ -22,6 +22,7 @@ Electronify converts a static web app build (Next.js, React, Vite, etc.) into a 
 14. [Complete Config Reference](#14-complete-config-reference)
 15. [Output Directory Reference](#15-output-directory-reference)
 16. [Common Errors & Fixes](#16-common-errors--fixes)
+17. [Web App Integration Checklist](#17-web-app-integration-checklist)
 
 ---
 
@@ -136,11 +137,14 @@ Create `electronify/config.json` with at minimum the three required fields:
   "window": {
     "width": 1400,
     "height": 900,
-    "minWidth": 1000,
-    "minHeight": 700
+    "minWidth": 0,
+    "minHeight": 0,
+    "maxWidth": 1920,
+    "maxHeight": 1080
   },
   "features": {
     "tray": false,
+    "menuBar": true,
     "notifications": true,
     "dragDrop": true,
     "singleInstance": true,
@@ -422,6 +426,51 @@ const result = await window.desktop.checkForUpdates();
 console.log(result.status);
 ```
 
+### Change the app icon color (theme tinting)
+
+You can tint the app icon to match your theme's primary color at runtime. The web app draws the tinted icon on a canvas and sends it to the main process — no extra dependencies required.
+
+```js
+async function applyIconColor(iconUrl, hexColor) {
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.crossOrigin = 'anonymous';
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = iconUrl;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d');
+
+  // Draw original icon
+  ctx.drawImage(img, 0, 0);
+
+  // Multiply blend: tints the icon while preserving its shape and detail
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = hexColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Restore destination-in to clip the fill to the icon's alpha
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(img, 0, 0);
+
+  return canvas.toDataURL('image/png');
+}
+
+// Usage — call this whenever your theme's primary color changes
+const base64 = await applyIconColor('/icons/logo.png', '#6366f1');
+await window.desktop.setIcon(base64);
+```
+
+**Notes:**
+- Works for both the taskbar/dock icon and the system tray icon simultaneously.
+- Use a **256×256 px or larger** source icon for best results — smaller icons look blurry in the taskbar.
+- `multiply` blend mode tints colorful icons. For monochrome/silhouette icons, use `source-atop` instead (solid color fill clipped to the icon's shape).
+- On macOS, the dock icon updates immediately. On Windows/Linux, the taskbar icon may take a moment to refresh.
+
 ### TypeScript types (add to your web project)
 
 ```ts
@@ -437,6 +486,7 @@ interface DesktopAPI {
     delete(key: string): Promise<{ success: boolean }>;
   };
   checkForUpdates(): Promise<{ status: string; result?: unknown }>;
+  setIcon(base64PNG: string): Promise<{ success: boolean; error?: string }>;
 }
 
 declare global {
@@ -466,6 +516,18 @@ The generated `updater.js` uses a provider-based pattern. The built-in providers
 
 - **`GitHubProvider`** — polls GitHub Releases for new versions
 - **`CustomHTTPProvider`** — polls a custom endpoint
+
+### Linux auto-update support
+
+Auto-update works differently depending on the Linux package format:
+
+| Format | Auto-update support | Notes |
+|--------|-------------------|-------|
+| **AppImage** | ✅ Full | `electron-updater` downloads and applies the update silently |
+| **Snap** | ✅ Via Snap Store | Updates handled by the store, not the app |
+| **deb / rpm** | ❌ Not supported | Can only *detect* a new version — cannot install it |
+
+**If you ship `.deb`:** the updater will detect a new version but cannot install it automatically. The recommended approach is to show the user a prompt with a link to download the new `.deb` — this is the same pattern used by VS Code and Slack on Linux. To maximise auto-update coverage on Linux, include `AppImage` in `linux.targets` (it is in the default).
 
 ### Adding a custom provider (advanced)
 
@@ -561,9 +623,12 @@ Electronify looks for `src/plugins/<name>.js` relative to the working directory.
 | `buildFolder` | string | No | `"./build"` | Path to your web app's build output |
 | `window.width` | number | No | `1400` | Initial window width (px) |
 | `window.height` | number | No | `900` | Initial window height (px) |
-| `window.minWidth` | number | No | `1000` | Minimum window width (px) |
-| `window.minHeight` | number | No | `700` | Minimum window height (px) |
+| `window.minWidth` | number | No | `0` | Minimum window width (px). `0` = no minimum |
+| `window.minHeight` | number | No | `0` | Minimum window height (px). `0` = no minimum |
+| `window.maxWidth` | number | No | — | Maximum window width (px). Omit for no limit |
+| `window.maxHeight` | number | No | — | Maximum window height (px). Omit for no limit |
 | `features.tray` | boolean | No | `false` | Enable system tray icon |
+| `features.menuBar` | boolean | No | `true` | Show or hide the native menu bar |
 | `features.notifications` | boolean | No | `true` | Enable native notifications |
 | `features.dragDrop` | boolean | No | `true` | Enable drag-and-drop |
 | `features.singleInstance` | boolean | No | `true` | Prevent multiple app instances |
@@ -634,9 +699,330 @@ sudo apt-get install -y rpm fakeroot dpkg
 
 Run `electronify build` before `electronify publish`.
 
+### Window cannot be resized below a certain size on Ubuntu / Linux
+
+This is caused by `minWidth` or `minHeight` being set too large. The defaults were previously `1000×700`, which blocks resizing on smaller displays. Set both to `0` (or remove them) for no minimum:
+
+```json
+"window": {
+  "minWidth": 0,
+  "minHeight": 0
+}
+```
+
+Linux window managers (GNOME in particular) enforce these constraints strictly — unlike Windows/macOS which handle them more loosely.
+
 ### App opens a blank screen
 
 Your web app likely uses `BrowserRouter` with absolute paths. Make sure it uses hash-based routing (`HashRouter`) or relative paths, since it is served via the `app://local/` custom protocol, not a real web server.
+
+---
+
+## 17. Web App Integration Checklist
+
+This section covers every change your web app needs to make to use Electronify's desktop features. The same build runs in the browser and as a desktop app — all integrations are gated behind a feature check so nothing breaks in the browser.
+
+---
+
+### Feature detection — do this first
+
+All `window.desktop` calls must be guarded. The API does not exist when running in a regular browser.
+
+```ts
+const isDesktop = typeof window !== 'undefined' && !!window.desktop;
+```
+
+**Reusable hook (React):**
+
+```ts
+// hooks/useDesktop.ts
+export function useDesktop() {
+  return typeof window !== 'undefined' ? window.desktop ?? null : null;
+}
+```
+
+---
+
+### Routing — the only breaking change
+
+The app is served via `app://local/`, not a real HTTP server. `BrowserRouter` with absolute paths breaks navigation.
+
+```tsx
+// ❌ Breaks on app://local/
+import { BrowserRouter } from 'react-router-dom';
+
+// ✅ Works — hash routing is protocol-agnostic
+import { HashRouter } from 'react-router-dom';
+```
+
+If you cannot switch to `HashRouter`, ensure all links and `navigate()` calls use **relative paths** and your bundler outputs relative asset paths.
+
+---
+
+### Notifications
+
+The desktop API requires no permission prompt. Fall back to the browser Notification API when running outside Electron.
+
+```ts
+export async function sendNotification(title: string, body: string) {
+  if (window.desktop) {
+    await window.desktop.notify({ title, body });
+    return;
+  }
+  // Browser fallback
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body });
+  } else if (Notification.permission !== 'denied') {
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') new Notification(title, { body });
+  }
+}
+```
+
+---
+
+### File dialogs
+
+Use native OS file pickers in the desktop app; fall back to `<input type="file">` in the browser.
+
+```ts
+// Open one or more files
+async function pickFiles(): Promise<string[] | null> {
+  if (window.desktop) return window.desktop.openFile();
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.onchange = () => resolve(Array.from(input.files ?? []).map((f) => f.name));
+    input.click();
+  });
+}
+
+// Open a folder
+async function pickFolder(): Promise<string[] | null> {
+  if (window.desktop) return window.desktop.openFolder();
+  return null; // not supported in browsers
+}
+
+// Save dialog
+async function saveFilePath(defaultName: string): Promise<string | null> {
+  if (window.desktop) return window.desktop.saveFile({ defaultName });
+  return null; // trigger a browser download instead
+}
+```
+
+---
+
+### Secure store
+
+Use `window.desktop.secureStore` for sensitive values (tokens, API keys). Data is encrypted on disk using the OS keychain. Do not use `localStorage` for secrets.
+
+```ts
+// utils/secureStore.ts
+export const secureStore = {
+  async set(key: string, value: string) {
+    if (window.desktop) {
+      await window.desktop.secureStore.set(key, value);
+    } else {
+      sessionStorage.setItem(key, value); // browser fallback — never localStorage
+    }
+  },
+  async get(key: string): Promise<string | null> {
+    if (window.desktop) return window.desktop.secureStore.get(key);
+    return sessionStorage.getItem(key);
+  },
+  async delete(key: string) {
+    if (window.desktop) {
+      await window.desktop.secureStore.delete(key);
+    } else {
+      sessionStorage.removeItem(key);
+    }
+  },
+};
+```
+
+---
+
+### Auto-updater UI
+
+The main process detects new versions but your UI must surface them. On Linux with `.deb`, the app cannot auto-install — direct the user to a download link.
+
+```ts
+// Call once on app mount
+async function checkForUpdates() {
+  if (!window.desktop) return;
+  const { result } = await window.desktop.checkForUpdates();
+  if (result?.updateAvailable) showUpdateBanner(result.version);
+}
+```
+
+**Update banner component (React):**
+
+```tsx
+export function UpdateBanner() {
+  const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!window.desktop) return;
+    window.desktop.checkForUpdates().then(({ result }) => {
+      if (result?.updateAvailable) setVersion(result.version);
+    });
+  }, []);
+
+  if (!version) return null;
+
+  return (
+    <div className="update-banner">
+      <span>Version {version} is available.</span>
+      {/* For AppImage: electron-updater handles it silently */}
+      {/* For .deb on Linux: always open a download link */}
+      <button onClick={() => window.open('https://yourapp.com/download')}>
+        Download
+      </button>
+      <button onClick={() => setVersion(null)}>Dismiss</button>
+    </div>
+  );
+}
+```
+
+---
+
+### Icon tinting
+
+Change the taskbar, dock, and tray icon to match your theme's primary color at runtime. Uses the Canvas API in the renderer — no extra dependencies needed.
+
+```ts
+// utils/iconTint.ts
+async function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+export async function tintIcon(iconUrl: string, hexColor: string): Promise<string> {
+  const img = await loadImage(iconUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.drawImage(img, 0, 0);
+  ctx.globalCompositeOperation = 'multiply'; // tints colored icons while preserving detail
+  ctx.fillStyle = hexColor;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = 'destination-in'; // clip to icon alpha
+  ctx.drawImage(img, 0, 0);
+
+  return canvas.toDataURL('image/png');
+}
+```
+
+> For monochrome / silhouette icons, replace `multiply` with `source-atop` for a flat solid-color fill.
+
+**Apply when theme changes (React):**
+
+```ts
+useEffect(() => {
+  if (!window.desktop) return;
+  tintIcon('/icons/logo.png', theme.primaryColor)
+    .then((base64) => window.desktop!.setIcon(base64))
+    .catch(console.error);
+}, [theme.primaryColor]);
+```
+
+The icon file must be in your `public/` folder and at least **256×256 px**.
+
+---
+
+### App version
+
+Display the version from `config.json` rather than your web build's `package.json`:
+
+```tsx
+export function AppVersion() {
+  const [version, setVersion] = useState('');
+  useEffect(() => {
+    window.desktop?.getVersion().then(setVersion);
+  }, []);
+  if (!version) return null;
+  return <span>v{version}</span>;
+}
+```
+
+---
+
+### TypeScript types
+
+Add this to your web project (e.g. `src/types/desktop.d.ts`) to get full type coverage on `window.desktop`:
+
+```ts
+interface SecureStore {
+  set(key: string, value: string): Promise<{ success: boolean; error?: string }>;
+  get(key: string): Promise<string | null>;
+  delete(key: string): Promise<{ success: boolean; error?: string }>;
+}
+
+interface DesktopAPI {
+  notify(opts: { title: string; body: string }): Promise<void>;
+  getVersion(): Promise<string>;
+  openFile(): Promise<string[] | null>;
+  openFolder(): Promise<string[] | null>;
+  saveFile(opts: { defaultName: string }): Promise<string | null>;
+  secureStore: SecureStore;
+  checkForUpdates(): Promise<{
+    status: string;
+    result?: { updateAvailable: boolean; version: string; releaseNotes?: string };
+  }>;
+  setIcon(base64PNG: string): Promise<{ success: boolean; error?: string }>;
+}
+
+declare global {
+  interface Window {
+    desktop?: DesktopAPI;
+  }
+}
+```
+
+---
+
+### What needs no changes
+
+| Feature | Why |
+|---------|-----|
+| **IndexedDB** | Works via `app://local/` — same-origin rules apply correctly |
+| **LocalStorage** | Works as normal |
+| **Service Workers** | Register and run as in a browser |
+| **Drag & drop** | Native browser drag events work unchanged |
+| **System tray** | Fully managed by the main process |
+| **Menu bar** | Controlled by `features.menuBar` in `config.json` |
+| **Single instance** | Main process focuses the existing window automatically |
+| **Offline support** | `app://local/` serves from disk — works offline by default |
+
+---
+
+### Full checklist
+
+```
+Critical
+  ✅ Switch to HashRouter (or use relative asset/link paths)
+  ✅ Guard every window.desktop call with a feature check
+
+Desktop API
+  ✅ Replace browser Notification API with window.desktop.notify()
+  ✅ Replace <input type="file"> with window.desktop.openFile() / openFolder()
+  ✅ Replace localStorage for secrets with window.desktop.secureStore
+  ✅ Show update-available banner on mount via window.desktop.checkForUpdates()
+  ✅ Open a download URL for .deb users on Linux (cannot auto-install)
+  ✅ Call window.desktop.setIcon() when theme primary color changes
+  ✅ Display app version via window.desktop.getVersion()
+
+Types
+  ✅ Add src/types/desktop.d.ts with the DesktopAPI interface
+```
 
 ---
 
