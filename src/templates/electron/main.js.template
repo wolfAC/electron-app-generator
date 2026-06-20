@@ -13,14 +13,14 @@ log.initialize();
 // Must be called before app.whenReady() — registers app:// as a standard secure
 // scheme so window.location.origin, IndexedDB, and fetch all behave normally.
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+  { scheme: CONFIG.protocol, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
 ]);
 
 let mainWindow;
 let trayIcon = null;
 
 /**
- * Setup the custom protocol app://local to support IndexedDB and Service Workers.
+ * Setup the custom protocol to support IndexedDB and Service Workers.
  * This protocol serves files from the application's build directory.
  *
  * Resolution order for each request path:
@@ -63,7 +63,7 @@ async function setupProtocol() {
     return null;
   };
 
-  await protocol.handle('app', async (request) => {
+  await protocol.handle(CONFIG.protocol, async (request) => {
     try {
       const parsedUrl = new URL(request.url);
       // Decode so paths with spaces / unicode resolve on disk.
@@ -116,7 +116,7 @@ function createWindow() {
     Menu.setApplicationMenu(null);
   }
 
-  mainWindow.loadURL('app://local/');
+  mainWindow.loadURL(`${CONFIG.protocol}://local/`);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
