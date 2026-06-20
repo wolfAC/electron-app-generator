@@ -19,6 +19,10 @@ export const ConfigSchema = z.object({
 
   buildFolder: z.string().min(1, "Build folder path is required").default("./build"),
 
+  protocol: z.string()
+    .regex(/^[a-z][a-z0-9+\-.]*$/, "Protocol must be a valid URI scheme (e.g., 'app', 'pulse', 'myapp')")
+    .default("app"),
+
   window: z.object({
     width: z.number().int().positive().default(1400),
     height: z.number().int().positive().default(900),
