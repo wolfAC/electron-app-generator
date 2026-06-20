@@ -22,29 +22,69 @@ let trayIcon = null;
 /**
  * Setup the custom protocol app://local to support IndexedDB and Service Workers.
  * This protocol serves files from the application's build directory.
+ *
+ * Resolution order for each request path:
+ *   1. Exact file        (/foo.js  -> web/foo.js)
+ *   2. Directory index   (/about, /about/ -> web/about/index.html)  — e.g. Next.js
+ *                        static export with trailingSlash, Nuxt generate.
+ *   3. Clean-URL .html   (/about   -> web/about.html)               — e.g. Next.js
+ *                        static export without trailingSlash.
+ *   4. SPA fallback to the root index.html — applied ONLY to navigation requests so
+ *      that a missing asset returns a real 404 instead of HTML. Without this guard a
+ *      mistyped script/style URL would resolve to index.html and the renderer would
+ *      throw "Uncaught SyntaxError: Unexpected token '<'", which is very hard to debug.
  */
 async function setupProtocol() {
-  await protocol.handle('app', async (request) => {
-    const buildPath = path.join(app.getAppPath(), 'web');
+  const buildPath = path.join(app.getAppPath(), 'web');
 
-    // Use URL parsing to correctly strip query strings / fragments from the path.
-    const parsedUrl = new URL(request.url);
-    let filePath = parsedUrl.pathname;
-    if (filePath === '' || filePath === '/') {
-      filePath = '/index.html';
+  // Resolve a request pathname to an absolute file inside buildPath, or null.
+  const resolveFile = async (pathname) => {
+    const candidates = [];
+    if (pathname === '' || pathname === '/') {
+      candidates.push(path.join(buildPath, 'index.html'));
+    } else {
+      const clean = pathname.replace(/\/+$/, ''); // strip trailing slashes
+      candidates.push(path.join(buildPath, pathname));            // 1. exact file
+      candidates.push(path.join(buildPath, clean, 'index.html')); // 2. directory index
+      candidates.push(path.join(buildPath, `${clean}.html`));     // 3. clean URL
     }
 
-    const absolutePath = path.join(buildPath, filePath);
+    for (const candidate of candidates) {
+      // Containment check: never serve a file resolved outside the build directory
+      // (e.g. via "../" in the request path).
+      const normalized = path.normalize(candidate);
+      if (normalized !== buildPath && !normalized.startsWith(buildPath + path.sep)) {
+        continue;
+      }
+      if (await fs.pathExists(normalized) && (await fs.stat(normalized)).isFile()) {
+        return normalized;
+      }
+    }
+    return null;
+  };
 
+  await protocol.handle('app', async (request) => {
     try {
-      if (await fs.pathExists(absolutePath) && (await fs.stat(absolutePath)).isFile()) {
-        return await net.fetch(`file://${absolutePath}`);
+      const parsedUrl = new URL(request.url);
+      // Decode so paths with spaces / unicode resolve on disk.
+      const pathname = decodeURIComponent(parsedUrl.pathname);
+
+      const resolved = await resolveFile(pathname);
+      if (resolved) {
+        return await net.fetch(`file://${resolved}`);
       }
 
-      // Fallback for SPA routing (return index.html for non-file requests)
-      const indexPath = path.join(buildPath, 'index.html');
-      if (await fs.pathExists(indexPath)) {
-        return await net.fetch(`file://${indexPath}`);
+      // Only fall back to index.html for client-side routes (document navigations).
+      // Browsers send "Accept: text/html" for navigations; extension-less paths are
+      // treated as routes too. Anything else (a real asset URL) gets a 404.
+      const accept = request.headers.get('accept') || '';
+      const isNavigation = accept.includes('text/html') || path.extname(pathname) === '';
+
+      if (isNavigation) {
+        const indexPath = path.join(buildPath, 'index.html');
+        if (await fs.pathExists(indexPath)) {
+          return await net.fetch(`file://${indexPath}`);
+        }
       }
     } catch (e) {
       log.error('Protocol error:', e);
