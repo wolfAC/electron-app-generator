@@ -13,4 +13,6 @@ contextBridge.exposeInMainWorld('desktop', {
   },
   checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates'),
   setIcon: (base64PNG) => ipcRenderer.invoke('desktop:setIcon', base64PNG),
+  openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
+  onDeepLink: (cb) => ipcRenderer.on('desktop:deepLink', (_event, url) => cb(url)),
 });

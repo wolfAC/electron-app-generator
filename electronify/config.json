@@ -19,6 +19,8 @@
     "minHeight": 700
   },
 
+  "protocol": "pulse",
+
   "features": {
     "tray": false,
     "menu": false,
