@@ -1,4 +1,4 @@
-const { app, BrowserWindow, protocol, ipcMain, dialog, Notification, nativeImage, Tray, Menu, net, safeStorage } = require('electron');
+const { app, BrowserWindow, protocol, ipcMain, dialog, Notification, nativeImage, Tray, Menu, net, safeStorage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
 const log = require('electron-log');
@@ -140,7 +140,7 @@ function setupTray() {
   trayIcon.setContextMenu(contextMenu);
 }
 
-// Handle Single Instance Lock
+// Handle Single Instance Lock + deep-link forwarding on Windows/Linux
 if (CONFIG.features.singleInstance) {
   const locked = app.requestSingleInstanceLock();
   if (!locked) {
@@ -148,13 +148,32 @@ if (CONFIG.features.singleInstance) {
     return;
   }
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
+    // On Windows/Linux the deep-link URL is passed as the last argv entry
+    const deepLinkUrl = argv.find((arg) => arg.startsWith(`${CONFIG.protocol}://`));
+    if (deepLinkUrl && mainWindow) {
+      mainWindow.webContents.send('desktop:deepLink', deepLinkUrl);
+    }
   });
 }
+
+// Register the app protocol with the OS so external URLs (e.g. OAuth callbacks)
+// route back into this app. Uses the same scheme as the renderer's origin.
+app.setAsDefaultProtocolClient(CONFIG.protocol);
+
+// macOS: deep links arrive via open-url after the app is already running
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    mainWindow.webContents.send('desktop:deepLink', url);
+  }
+});
 
 app.whenReady().then(async () => {
   try {
@@ -254,6 +273,10 @@ ipcMain.handle('desktop:setIcon', (event, base64PNG) => {
     log.error('setIcon error:', e);
     return { success: false, error: e.message };
   }
+});
+
+ipcMain.handle('desktop:openExternal', async (_event, url) => {
+  await shell.openExternal(url);
 });
 
 ipcMain.handle('desktop:checkForUpdates', async () => {
