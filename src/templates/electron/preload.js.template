@@ -15,4 +15,6 @@ contextBridge.exposeInMainWorld('desktop', {
   setIcon: (base64PNG) => ipcRenderer.invoke('desktop:setIcon', base64PNG),
   openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
   onDeepLink: (cb) => ipcRenderer.on('desktop:deepLink', (_event, url) => cb(url)),
+  startOAuthServer: () => ipcRenderer.invoke('desktop:startOAuthServer'),
+  onOAuthCallback: (cb) => ipcRenderer.on('desktop:oauthCallback', (_event, relativeUrl) => cb(relativeUrl)),
 });
