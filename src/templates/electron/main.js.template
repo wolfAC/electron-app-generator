@@ -1,4 +1,4 @@
-const { app, BrowserWindow, protocol, ipcMain, dialog, Notification, nativeImage, Tray, Menu, net, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, protocol, ipcMain, dialog, Notification, nativeImage, Tray, Menu, net, safeStorage, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
 const log = require('electron-log');
@@ -177,6 +177,35 @@ app.on('open-url', (event, url) => {
 
 app.whenReady().then(async () => {
   try {
+    // Inject CORS headers for API responses so the custom-scheme origin
+    // (e.g. pulse://local) is allowed by the remote backend regardless of
+    // whether the server has CORS configured.
+    session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+      if (!details.url.includes('/api/')) {
+        callback({ responseHeaders: details.responseHeaders });
+        return;
+      }
+      const existing = details.responseHeaders['access-control-allow-origin']
+        || details.responseHeaders['Access-Control-Allow-Origin'];
+      // For OPTIONS preflight, the browser requires a 2xx status AND the header.
+      // If the server returned a non-2xx (e.g. 405), fix the status line too.
+      const isOptionsPreflight = details.method === 'OPTIONS';
+      const needsStatusFix = isOptionsPreflight && details.statusCode >= 300;
+      if (!existing || needsStatusFix) {
+        callback({
+          responseHeaders: {
+            ...details.responseHeaders,
+            'access-control-allow-origin': [`${CONFIG.protocol}://local`],
+            'access-control-allow-methods': ['GET, POST, OPTIONS'],
+            'access-control-allow-headers': ['Authorization, Content-Type'],
+          },
+          ...(needsStatusFix && { statusLine: 'HTTP/1.1 200 OK' }),
+        });
+      } else {
+        callback({ responseHeaders: details.responseHeaders });
+      }
+    });
+
     await setupProtocol();
     createWindow();
     setupTray();
@@ -279,7 +308,13 @@ ipcMain.handle('desktop:openExternal', async (_event, url) => {
   await shell.openExternal(url);
 });
 
+let _oauthServer = null;
+
 ipcMain.handle('desktop:startOAuthServer', () => {
+  if (_oauthServer) {
+    _oauthServer.close();
+    _oauthServer = null;
+  }
   return new Promise((resolve, reject) => {
     const http = require('http');
     const server = http.createServer((req, res) => {
@@ -287,12 +322,21 @@ ipcMain.handle('desktop:startOAuthServer', () => {
       res.end('<html><body><p>Authentication complete. You may close this tab.</p></body></html>');
       if (mainWindow) mainWindow.webContents.send('desktop:oauthCallback', req.url);
       server.close();
+      _oauthServer = null;
     });
     server.listen(0, '127.0.0.1', () => {
+      _oauthServer = server;
       resolve(server.address().port);
     });
     server.on('error', reject);
   });
+});
+
+ipcMain.handle('desktop:stopOAuthServer', () => {
+  if (_oauthServer) {
+    _oauthServer.close();
+    _oauthServer = null;
+  }
 });
 
 ipcMain.handle('desktop:checkForUpdates', async () => {

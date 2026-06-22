@@ -16,5 +16,9 @@ contextBridge.exposeInMainWorld('desktop', {
   openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
   onDeepLink: (cb) => ipcRenderer.on('desktop:deepLink', (_event, url) => cb(url)),
   startOAuthServer: () => ipcRenderer.invoke('desktop:startOAuthServer'),
-  onOAuthCallback: (cb) => ipcRenderer.on('desktop:oauthCallback', (_event, relativeUrl) => cb(relativeUrl)),
+  onOAuthCallback: (cb) => {
+    ipcRenderer.removeAllListeners('desktop:oauthCallback');
+    ipcRenderer.once('desktop:oauthCallback', (_event, relativeUrl) => cb(relativeUrl));
+  },
+  stopOAuthServer: () => ipcRenderer.invoke('desktop:stopOAuthServer'),
 });
