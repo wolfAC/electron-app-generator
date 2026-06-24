@@ -50,6 +50,18 @@ export const ConfigSchema = z.object({
     targets: z.array(z.enum(['AppImage', 'deb', 'rpm', 'snap', 'pacman', 'flatpak'])).default(['AppImage', 'deb']),
   }).prefault({}),
 
+  win: z.object({
+    targets: z.array(z.enum(['nsis', 'msi', 'portable', 'zip', '7z'])).default(['nsis']),
+  }).prefault({}),
+
+  mac: z.object({
+    targets: z.array(z.enum(['dmg', 'pkg', 'zip', 'mas'])).default(['dmg']),
+  }).prefault({}),
+
+  apiUrl: z.string().default(""),
+
+  vercelBypassSecret: z.string().default(""),
+
   plugins: z.array(z.string()).default([]),
 });
 

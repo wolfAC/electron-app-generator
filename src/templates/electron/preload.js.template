@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('desktop', {
     get: (key) => ipcRenderer.invoke('desktop:secureStore:get', key),
     delete: (key) => ipcRenderer.invoke('desktop:secureStore:delete', key),
   },
+  fetch: (url, options) => ipcRenderer.invoke('desktop:fetch', url, options),
   checkForUpdates: () => ipcRenderer.invoke('desktop:checkForUpdates'),
   setIcon: (base64PNG) => ipcRenderer.invoke('desktop:setIcon', base64PNG),
   openExternal: (url) => ipcRenderer.invoke('desktop:openExternal', url),
