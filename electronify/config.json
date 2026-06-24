@@ -39,5 +39,17 @@
     "targets": ["AppImage", "deb", "rpm"]
   },
 
+  "win": {
+    "targets": ["nsis", "msi", "portable"]
+  },
+
+  "mac": {
+    "targets": ["dmg", "pkg", "zip"]
+  },
+
+  "apiUrl": "",
+
+  "vercelBypassSecret": "",
+
   "plugins": []
 }

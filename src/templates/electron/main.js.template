@@ -1,7 +1,17 @@
 const { app, BrowserWindow, protocol, ipcMain, dialog, Notification, nativeImage, Tray, Menu, net, safeStorage, shell, session } = require('electron');
 const path = require('path');
-const fs = require('fs-extra');
+const fsPromises = require('fs/promises');
 const log = require('electron-log');
+
+async function pathExists(p) {
+  try { await fsPromises.access(p); return true; } catch { return false; }
+}
+async function readJson(p) {
+  return JSON.parse(await fsPromises.readFile(p, 'utf8'));
+}
+async function writeJson(p, data) {
+  await fsPromises.writeFile(p, JSON.stringify(data, null, 2));
+}
 const { createUpdater } = require('./updater');
 
 // This will be replaced by the generator with the actual config
@@ -56,7 +66,7 @@ async function setupProtocol() {
       if (normalized !== buildPath && !normalized.startsWith(buildPath + path.sep)) {
         continue;
       }
-      if (await fs.pathExists(normalized) && (await fs.stat(normalized)).isFile()) {
+      if (await pathExists(normalized) && (await fsPromises.stat(normalized)).isFile()) {
         return normalized;
       }
     }
@@ -82,7 +92,7 @@ async function setupProtocol() {
 
       if (isNavigation) {
         const indexPath = path.join(buildPath, 'index.html');
-        if (await fs.pathExists(indexPath)) {
+        if (await pathExists(indexPath)) {
           return await net.fetch(`file://${indexPath}`);
         }
       }
@@ -206,6 +216,25 @@ app.whenReady().then(async () => {
       }
     });
 
+    // Bypass Vercel deployment protection on preview builds.
+    // Intercepts outgoing requests to the API host and injects the bypass header
+    // before they leave, preventing Vercel from redirecting to its SSO page.
+    if (CONFIG.vercelBypassSecret && CONFIG.apiUrl) {
+      try {
+        const apiHost = new URL(CONFIG.apiUrl).hostname;
+        session.defaultSession.webRequest.onBeforeSendHeaders(
+          { urls: [`https://${apiHost}/*`] },
+          (details, callback) => {
+            details.requestHeaders['x-vercel-protection-bypass'] = CONFIG.vercelBypassSecret;
+            callback({ requestHeaders: details.requestHeaders });
+          }
+        );
+        log.info(`Vercel bypass header active for ${apiHost}`);
+      } catch (e) {
+        log.warn('Failed to set up Vercel bypass interceptor:', e.message);
+      }
+    }
+
     await setupProtocol();
     createWindow();
     setupTray();
@@ -249,12 +278,12 @@ ipcMain.handle('desktop:secureStore:set', async (event, { key, value }) => {
     const encrypted = safeStorage.encryptString(value);
 
     let store = {};
-    if (await fs.pathExists(storePath)) {
-      store = await fs.readJson(storePath);
+    if (await pathExists(storePath)) {
+      store = await readJson(storePath);
     }
 
     store[key] = encrypted.toString('base64');
-    await fs.writeJson(storePath, store, { spaces: 2 });
+    await writeJson(storePath, store);
 
     return { success: true };
   } catch (e) {
@@ -266,8 +295,8 @@ ipcMain.handle('desktop:secureStore:set', async (event, { key, value }) => {
 ipcMain.handle('desktop:secureStore:get', async (event, key) => {
   try {
     const storePath = path.join(app.getPath('userData'), 'secure_store.json');
-    if (!await fs.pathExists(storePath)) return null;
-    const store = await fs.readJson(storePath);
+    if (!await pathExists(storePath)) return null;
+    const store = await readJson(storePath);
     const encrypted = store[key];
     if (!encrypted) return null;
     return safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
@@ -280,10 +309,10 @@ ipcMain.handle('desktop:secureStore:get', async (event, key) => {
 ipcMain.handle('desktop:secureStore:delete', async (event, key) => {
   try {
     const storePath = path.join(app.getPath('userData'), 'secure_store.json');
-    if (!await fs.pathExists(storePath)) return { success: true };
-    const store = await fs.readJson(storePath);
+    if (!await pathExists(storePath)) return { success: true };
+    const store = await readJson(storePath);
     delete store[key];
-    await fs.writeJson(storePath, store, { spaces: 2 });
+    await writeJson(storePath, store);
     return { success: true };
   } catch (e) {
     log.error('SecureStore delete error:', e);
@@ -336,6 +365,39 @@ ipcMain.handle('desktop:stopOAuthServer', () => {
   if (_oauthServer) {
     _oauthServer.close();
     _oauthServer = null;
+  }
+});
+
+ipcMain.handle('desktop:fetch', async (_event, url, options) => {
+  try {
+    const headers = { ...(options?.headers ?? {}) };
+    // Inject Vercel deployment-protection bypass header when configured.
+    // Without it, protected deployments return a 307 → Vercel SSO HTML page.
+    if (CONFIG.vercelBypassSecret && CONFIG.apiUrl) {
+      try {
+        if (new URL(url).hostname === new URL(CONFIG.apiUrl).hostname) {
+          headers['x-vercel-protection-bypass'] = CONFIG.vercelBypassSecret;
+        }
+      } catch (_) {}
+    }
+    const response = await net.fetch(url, {
+      method: options?.method ?? 'GET',
+      headers,
+      body: options?.body ?? undefined,
+      redirect: 'manual', // Never follow redirects — a redirect means Vercel protection fired
+    });
+    // A redirect here means deployment protection redirected to the SSO page.
+    // Return a clear 401 so callers don't mistake SSO HTML for a valid response.
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location') ?? '';
+      log.warn(`desktop:fetch: blocked by deployment protection (${response.status} → ${location})`);
+      return { ok: false, status: 401, statusText: 'Blocked by Vercel deployment protection', body: '' };
+    }
+    const body = await response.text();
+    return { ok: response.ok, status: response.status, statusText: response.statusText, body };
+  } catch (e) {
+    log.error('desktop:fetch error:', e.message);
+    throw e;
   }
 });
 

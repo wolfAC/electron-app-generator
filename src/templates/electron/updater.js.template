@@ -1,5 +1,11 @@
-const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
+
+// Lazy-load electron-updater: only providers that actually use it will trigger
+// the require, so apps configured with a custom HTTP provider start fine even
+// if electron-updater is absent from the package.
+function getAutoUpdater() {
+  return require('electron-updater').autoUpdater;
+}
 
 /**
  * Base class for Update Providers
@@ -16,13 +22,13 @@ class UpdateProvider {
 class GitHubProvider extends UpdateProvider {
   async check() {
     log.info('Checking for updates via GitHub...');
-    return await autoUpdater.checkForUpdates();
+    return await getAutoUpdater().checkForUpdates();
   }
   async download() {
-    return await autoUpdater.downloadUpdate();
+    return await getAutoUpdater().downloadUpdate();
   }
   async getLatest() {
-    return await autoUpdater.getLatestVersion();
+    return await getAutoUpdater().getLatestVersion();
   }
 }
 
@@ -58,8 +64,6 @@ class CustomHTTPProvider extends UpdateProvider {
 
   async download() {
     log.info('Downloading update from custom provider...');
-    // Implementation would typically involve autoUpdater.downloadUpdate()
-    // if the custom provider is just a wrapper around a compatible server.
   }
 
   async getLatest() {
@@ -76,7 +80,6 @@ class CustomHTTPProvider extends UpdateProvider {
 const PROVIDERS = {
   github: GitHubProvider,
   custom: CustomHTTPProvider,
-  // Other providers would be added here
 };
 
 function createUpdater(config) {

@@ -3,7 +3,7 @@ import fs from 'fs-extra';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { validateProject } from './validator.js';
-import { build } from 'electron-builder';
+import { build, createTargets, Platform } from 'electron-builder';
 import { pluginManager } from './pluginManager.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -57,15 +57,16 @@ export async function buildProject(): Promise<void> {
     dependencies: {
       'electron-log': '^5.4.4',
       'electron-updater': '^6.3.9',
-      'fs-extra': '^11.3.5'
     },
     devDependencies: {
       'electron': '^32.0.0'
     }
   };
   await fs.writeJson(path.join(appDir, 'package.json'), appPackageJson, { spaces: 2 });
-
   console.log('📦 Installing app dependencies...');
+  // Use npm (not pnpm) so all transitive deps land in a flat top-level node_modules.
+  // pnpm's isolated virtual-store layout creates symlinks that break inside an asar archive
+  // because electron-builder follows the symlinks but doesn't hoist the nested .pnpm deps.
   execSync('npm install --omit=dev', { cwd: appDir, stdio: 'inherit' });
 
   // 5. Generate main.js from template
@@ -92,7 +93,20 @@ export async function buildProject(): Promise<void> {
     const iconPath = path.join(process.cwd(), 'electronify', 'assets', 'icon.png');
     const iconExists = await fs.pathExists(iconPath);
 
+    // Resolve platform: ELECTRON_PLATFORM env var → current OS
+    const platformKey = process.env.ELECTRON_PLATFORM ?? (
+      process.platform === 'win32' ? 'win' : process.platform === 'darwin' ? 'mac' : 'linux'
+    );
+    const platformMap: Record<string, Platform> = {
+      linux: Platform.LINUX,
+      win: Platform.WINDOWS,
+      mac: Platform.MAC,
+    };
+    const ebPlatform = platformMap[platformKey] ?? Platform.LINUX;
+    const targets = createTargets([ebPlatform]);
+
     await build({
+      targets,
       config: {
         appId: config.appId,
         productName: config.name,
@@ -103,11 +117,15 @@ export async function buildProject(): Promise<void> {
           output: path.join(process.cwd(), 'releases'),
         },
         files: ['**/*'],
+        asarUnpack: [
+          'node_modules/electron-updater/**/*',
+          'node_modules/electron-log/**/*',
+        ],
         win: {
-          target: 'nsis',
+          target: (config as any).win?.targets ?? ['nsis'],
         },
         mac: {
-          target: 'dmg',
+          target: (config as any).mac?.targets ?? ['dmg'],
         },
         linux: {
           target: config.linux.targets,
