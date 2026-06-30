@@ -84,6 +84,41 @@ async function setupProtocol() {
         return await net.fetch(`file://${resolved}`);
       }
 
+      // Dynamic-route RSC-payload fallback: Next.js fetches /route/[id].txt when navigating
+      // client-side. For dynamic routes only _placeholder_.txt is pre-generated, so any real
+      // ID (e.g. /goals/edit/abc123.txt) returns 404 and the navigation silently fails.
+      // Serve _placeholder_.txt instead — its RSC payload just says "mount the client
+      // component", and useParams() inside the client component reads the actual ID from
+      // the URL, so the correct record loads from IDB.
+      //
+      // Also handles nested __next.xxx.txt files under a real ID directory:
+      //   /goals/edit/abc123/__next.xxx.txt → /goals/edit/_placeholder_/__next.xxx.txt
+      if (pathname.endsWith('.txt')) {
+        const parts = pathname.split('/');
+        const last = parts[parts.length - 1]; // e.g. "abc123.txt" or "__next.xxx.txt"
+        if (!last.startsWith('__') && last !== '_placeholder_.txt') {
+          // Shallow case: /route/abc123.txt → /route/_placeholder_.txt
+          const fallbackPath = [...parts.slice(0, -1), '_placeholder_.txt'].join('/');
+          const fallbackResolved = await resolveFile(fallbackPath);
+          if (fallbackResolved) {
+            return await net.fetch(`file://${fallbackResolved}`);
+          }
+        }
+        if (last.startsWith('__') && parts.length >= 3) {
+          // Nested case: /route/abc123/__next.xxx.txt → /route/_placeholder_/__next.xxx.txt
+          const parentIdx = parts.length - 2;
+          const parentDir = parts[parentIdx];
+          if (parentDir !== '_placeholder_' && parentDir !== '' && !parentDir.startsWith('__')) {
+            const fallbackParts = [...parts];
+            fallbackParts[parentIdx] = '_placeholder_';
+            const fallbackResolved = await resolveFile(fallbackParts.join('/'));
+            if (fallbackResolved) {
+              return await net.fetch(`file://${fallbackResolved}`);
+            }
+          }
+        }
+      }
+
       // Only fall back to index.html for client-side routes (document navigations).
       // Browsers send "Accept: text/html" for navigations; extension-less paths are
       // treated as routes too. Anything else (a real asset URL) gets a 404.
@@ -130,6 +165,27 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // macOS: two-finger horizontal swipe fires the 'swipe' event.
+  mainWindow.on('swipe', (_event, direction) => {
+    if (direction === 'left' && mainWindow.webContents.canGoBack()) {
+      mainWindow.webContents.goBack();
+    } else if (direction === 'right' && mainWindow.webContents.canGoForward()) {
+      mainWindow.webContents.goForward();
+    }
+  });
+
+  // Linux / Windows: libinput-gestures and most trackpad drivers map
+  // two-finger horizontal swipe to Alt+Arrow. Also a standard keyboard
+  // shortcut on all platforms so it works even without gesture drivers.
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.type !== 'keyDown' || !input.alt) return;
+    if (input.key === 'ArrowLeft' && mainWindow.webContents.canGoBack()) {
+      mainWindow.webContents.goBack();
+    } else if (input.key === 'ArrowRight' && mainWindow.webContents.canGoForward()) {
+      mainWindow.webContents.goForward();
+    }
   });
 }
 
@@ -338,6 +394,33 @@ ipcMain.handle('desktop:openExternal', async (_event, url) => {
 });
 
 let _oauthServer = null;
+let _oauthPopup = null;
+
+// Opens a child BrowserWindow for OAuth so the user stays within the app.
+// `title` is optional — callers pass a context-specific label (sign-in vs Drive).
+ipcMain.handle('desktop:openAuthPopup', (_event, url, title) => {
+  if (_oauthPopup && !_oauthPopup.isDestroyed()) {
+    _oauthPopup.focus();
+    return;
+  }
+  const { BrowserWindow: BW } = require('electron');
+  _oauthPopup = new BW({
+    width: 520,
+    height: 680,
+    title: title || 'Authenticate',
+    backgroundColor: '#181818',
+    parent: mainWindow ?? undefined,
+    modal: true,
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  _oauthPopup.loadURL(url);
+  _oauthPopup.on('closed', () => { _oauthPopup = null; });
+});
 
 ipcMain.handle('desktop:startOAuthServer', () => {
   if (_oauthServer) {
@@ -347,9 +430,18 @@ ipcMain.handle('desktop:startOAuthServer', () => {
   return new Promise((resolve, reject) => {
     const http = require('http');
     const server = http.createServer((req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end('<html><body><p>Authentication complete. You may close this tab.</p></body></html>');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Authentication Complete</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#181818;color:#f2f2f2;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}.card{background:#1e1e1e;border:1px solid #333;border-radius:16px;padding:40px 32px;text-align:center;max-width:300px;width:100%;display:flex;flex-direction:column;align-items:center;gap:20px}.icon{width:52px;height:52px;background:rgba(99,102,241,.12);border:1px solid rgba(99,102,241,.2);border-radius:14px;display:flex;align-items:center;justify-content:center}.check{width:24px;height:24px;color:#6366f1}h2{font-size:15px;font-weight:600;letter-spacing:-.01em}p{font-size:12px;color:#8a8a8a;line-height:1.5}</style>
+</head><body><div class="card"><div class="icon"><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></div><h2>Authentication Complete</h2><p>This window will close automatically.</p></div></body></html>`);
       if (mainWindow) mainWindow.webContents.send('desktop:oauthCallback', req.url);
+      // Close the in-app OAuth popup shortly after the callback fires
+      setTimeout(() => {
+        if (_oauthPopup && !_oauthPopup.isDestroyed()) {
+          _oauthPopup.close();
+          _oauthPopup = null;
+        }
+      }, 800);
       server.close();
       _oauthServer = null;
     });
@@ -365,6 +457,10 @@ ipcMain.handle('desktop:stopOAuthServer', () => {
   if (_oauthServer) {
     _oauthServer.close();
     _oauthServer = null;
+  }
+  if (_oauthPopup && !_oauthPopup.isDestroyed()) {
+    _oauthPopup.close();
+    _oauthPopup = null;
   }
 });
 
